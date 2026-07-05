@@ -26,6 +26,17 @@ console = Console()
 err_console = Console(stderr=True)
 
 
+def _print_json(data) -> None:
+    """Emit machine-readable JSON without extra Rich status or progress text."""
+    console.print(json.dumps(data, indent=2))
+
+
+def _json_error(message: str, exit_code: int = 1) -> None:
+    """Emit a consistent JSON error payload and exit."""
+    _print_json({"error": message})
+    sys.exit(exit_code)
+
+
 def _flag(country_code: str) -> str:
     """Convert ISO 3166-1 alpha-2 code to flag emoji."""
     if not country_code or len(country_code) != 2:
@@ -147,29 +158,37 @@ def bulk(file: str, as_json: bool, as_csv: bool):
     ips = [ln.strip() for ln in lines if ln.strip() and not ln.startswith("#")]
 
     if not ips:
+        if as_json:
+            _json_error("No valid IPs found in file.")
         err_console.print("[red]No valid IPs found in file.[/red]")
         sys.exit(1)
 
-    console.print(f"[cyan]Processing {len(ips)} addresses…[/cyan]")
-
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-        console=console,
-    ) as progress:
-        task = progress.add_task("Geolocating…", total=len(ips))
-        results = []
+    results = []
+    if as_json:
         chunk_size = 100
         for i in range(0, len(ips), chunk_size):
             chunk = ips[i : i + chunk_size]
             chunk_results = geolocate_batch(chunk)
             results.extend(chunk_results)
-            progress.advance(task, len(chunk))
+    else:
+        console.print(f"[cyan]Processing {len(ips)} addresses…[/cyan]")
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Geolocating…", total=len(ips))
+            chunk_size = 100
+            for i in range(0, len(ips), chunk_size):
+                chunk = ips[i : i + chunk_size]
+                chunk_results = geolocate_batch(chunk)
+                results.extend(chunk_results)
+                progress.advance(task, len(chunk))
 
     if as_json:
-        console.print_json(json.dumps(results))
+        _print_json(results)
         return
 
     if as_csv:
@@ -211,14 +230,18 @@ def bulk(file: str, as_json: bool, as_csv: bool):
 def rdns(ips: tuple, as_json: bool):
     """Reverse DNS lookup for one or more IPs."""
     results = []
-    with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as progress:
-        task = progress.add_task("Resolving…", total=len(ips))
+    if as_json:
         for ip in ips:
             results.append(reverse_dns(ip))
-            progress.advance(task)
+    else:
+        with Progress(SpinnerColumn(), TextColumn("{task.description}"), console=console) as progress:
+            task = progress.add_task("Resolving…", total=len(ips))
+            for ip in ips:
+                results.append(reverse_dns(ip))
+                progress.advance(task)
 
     if as_json:
-        console.print_json(json.dumps(results))
+        _print_json(results)
         return
 
     table = Table(title="Reverse DNS Lookup", box=box.ROUNDED)
@@ -370,21 +393,27 @@ def ip_range(start_ip: str, end_ip: str, as_json: bool):
         start = _ip.ip_address(start_ip.strip())
         end = _ip.ip_address(end_ip.strip())
     except ValueError as e:
+        if as_json:
+            _json_error(str(e))
         err_console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
 
     if start > end:
+        if as_json:
+            _json_error("start IP must be ≤ end IP")
         err_console.print("[red]Error:[/red] start IP must be ≤ end IP")
         sys.exit(1)
 
     try:
         networks = list(_ip.summarize_address_range(start, end))
     except Exception as e:
+        if as_json:
+            _json_error(str(e))
         err_console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
 
     if as_json:
-        console.print_json(json.dumps([str(n) for n in networks]))
+        _print_json([str(n) for n in networks])
         return
 
     table = Table(title=f"CIDR Blocks: {start_ip} → {end_ip}", box=box.ROUNDED)

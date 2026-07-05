@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ipgeo-cli"
-version = "0.1.1"
+version = "0.1.2"
 description = "IP geolocation and intelligence tool — geolocate IPs, bulk lookup, reverse DNS, CIDR calc, VPN detection."
 readme = "README.md"
 license = { text = "MIT" }
